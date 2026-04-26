@@ -1,7 +1,13 @@
 import os
+import sys
+
+# Add the project root to the Python path so 'src' can be imported
+current_dir = os.path.dirname(os.path.abspath(__file__))
+project_root = os.path.dirname(current_dir)
+sys.path.append(project_root)
+
 import json
 import torch
-import sys
 
 from src.model import PashtoCRNN
 from src.segmenter import YOLOSegmenter
@@ -13,7 +19,7 @@ class FullPagePashtoRecognition:
     Stage 1: YOLOv8 detects lines.
     Stage 2: CRNN reads cropped lines sequence-by-sequence.
     """
-    def __init__(self, yolo_weights="models/yolov8n.pt", crnn_weights="models/crnn_pashto.pth", vocab_path="models/vocab.json"):
+    def __init__(self, yolo_weights="models/best.pt", crnn_weights="models/crnn_pashto.pth", vocab_path="models/vocab.json"):
         # Set Device
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         print(f"Loading pipeline on {self.device}...")
@@ -41,7 +47,7 @@ class FullPagePashtoRecognition:
             print(f"Warning: {crnn_weights} not found. Ensure CRNN weights exist or run `train.py`.")
             
         # 3. LOAD YOLO
-        # Note: Provide the actual path to your custom YOLO checkpoint here
+        # Using the custom trained best.pt weights
         self.segmenter = YOLOSegmenter(model_path=yolo_weights)
         print("Loaded YOLOv8 Segmenter Success.")
 
@@ -60,6 +66,10 @@ class FullPagePashtoRecognition:
                 if char not in ["<PAD>", "<UNK>", "<BLANK>"]:
                     decoded.append(char)
             prev = p
+            
+        # --- THE RTL FIX ---
+        # Reverse the decoded characters to reconstruct the Right-to-Left Pashto word properly
+        decoded.reverse()
             
         # Join into UTF-8 Pashto String
         return "".join(decoded)
@@ -108,9 +118,9 @@ if __name__ == "__main__":
     Test script. Put a valid document in data/raw/ and run:
     python src/pipeline.py
     """
-    # Replace yolov8n.pt realistically with your bounding box model (e.g. models/yolo_lines.pt)
+    # Initialize with our custom AI models
     stitcher = FullPagePashtoRecognition(
-        yolo_weights="models/yolov8n.pt", 
+        yolo_weights="models/best.pt", 
         crnn_weights="models/crnn_pashto.pth",
         vocab_path="models/vocab.json"
     )
@@ -122,6 +132,14 @@ if __name__ == "__main__":
         print("\n===============================")
         print(" EXTRACTED PASHTO DOCUMENT")
         print("===============================\n")
-        print(text)
+        
+        # bidi is used here so your terminal prints RTL perfectly (web browsers handle this natively later)
+        try:
+            from bidi.algorithm import get_display
+            print(get_display(text))
+        except ImportError:
+            print(text)
+            print("\n(Note: Install python-bidi for perfect terminal RTL rendering: pip install python-bidi)")
+            
     else:
         print(f"\nPlease add a test document to {test_img} to run the stitcher demo.")

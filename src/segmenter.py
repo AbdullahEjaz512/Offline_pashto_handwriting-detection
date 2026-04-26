@@ -35,6 +35,12 @@ class YOLOSegmenter:
         
         for box in sorted_boxes:
             xmin, ymin, xmax, ymax = map(int, box)
+            
+            height = ymax - ymin
+            # THE FILTER: If the box is thinner than 15 pixels, it's a notebook line. Ignore it!
+            if height < 15:
+                continue
+                
             # Add slight vertical padding (optional but helpful if bboxes are tight)
             line_crop = full_img.crop((xmin, ymin, xmax, ymax))
             crops.append(line_crop)
