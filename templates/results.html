@@ -18,9 +18,7 @@
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <div class="flex justify-between h-16">
                 <div class="flex items-center space-x-8">
-                    <div class="flex-shrink-0 flex items-center">
-                        <a href="/" class="text-blue-600 font-extrabold text-2xl tracking-tight">Pashto OCR</a>
-                    </div>
+                    <a href="/" class="text-blue-600 font-extrabold text-2xl tracking-tight">Pashto OCR</a>
                     <div class="hidden md:flex space-x-4">
                         <a href="/" class="text-slate-500 hover:text-slate-900 px-3 py-2 rounded-md text-sm font-medium">Dashboard</a>
                         <a href="/new-scan" class="text-slate-500 hover:text-slate-900 px-3 py-2 rounded-md text-sm font-medium">New Scan</a>
@@ -38,7 +36,7 @@
     <main class="flex-grow max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <div class="mb-6 flex items-center justify-between">
             <h1 class="text-2xl font-bold text-slate-900">Extraction Results</h1>
-            <a href="/" class="text-sm text-indigo-600 font-medium hover:underline">&larr; Upload new file</a>
+            <a href="/new-scan" class="text-sm text-indigo-600 font-medium hover:underline">&larr; Upload new file</a>
         </div>
 
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
@@ -47,13 +45,11 @@
                 <div class="bg-white p-4 rounded-xl shadow border border-slate-100 flex-grow flex flex-col">
                     <h2 class="text-sm font-semibold text-slate-500 uppercase tracking-wider mb-4">Original Image</h2>
                     <div class="bg-slate-100 rounded-lg overflow-hidden flex-grow flex items-center justify-center p-4 border border-slate-200">
-                        <div class="text-center text-slate-400">
-                            <p>Scanned Document Preview</p>
-                        </div>
+                        <img src="{{ url_for('static', filename='uploads/' ~ scan.stored_filename) }}" alt="Uploaded document" class="max-h-[620px] w-auto object-contain rounded-lg shadow-sm">
                     </div>
                     <div class="mt-4 grid grid-cols-2 text-sm text-slate-500">
-                        <div><span class="font-medium text-slate-700">Dimensions:</span> 1200 x 1600px</div>
-                        <div><span class="font-medium text-slate-700">File Size:</span> 1.2 MB</div>
+                        <div><span class="font-medium text-slate-700">Filename:</span> {{ scan.filename }}</div>
+                        <div><span class="font-medium text-slate-700">File Size:</span> {{ (scan.file_size / 1024 / 1024)|round(2) }} MB</div>
                     </div>
                 </div>
             </div>
@@ -65,22 +61,20 @@
                         <h2 class="text-sm font-semibold text-slate-500 uppercase tracking-wider">Extracted Pashto Text</h2>
                     </div>
                     
-                    <textarea id="extracted-text" dir="rtl" class="pashto-text flex-grow w-full bg-slate-50 border border-slate-200 rounded-lg p-4 text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none" rows="10" placeholder="Extracted text will appear here...">پښتو یو ډېر په زړه پورې او تاریخي ژبه ده.
-
-دا د افغانستان او پاکستان په ډیرو سیمو کې ویل کیږي.</textarea>
+                    <textarea id="extracted-text" dir="rtl" class="pashto-text flex-grow w-full bg-slate-50 border border-slate-200 rounded-lg p-4 text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none" rows="10" placeholder="Extracted text will appear here...">{{ scan.text }}</textarea>
 
                     <!-- Stat Cards -->
                     <div class="grid grid-cols-3 gap-4 mt-6">
                         <div class="bg-indigo-50 p-4 rounded-lg text-center border border-indigo-100">
-                            <p class="text-2xl font-bold text-indigo-700">24</p>
+                            <p class="text-2xl font-bold text-indigo-700">{{ scan.word_count }}</p>
                             <p class="text-xs text-indigo-500 uppercase tracking-wide mt-1">Word Count</p>
                         </div>
                         <div class="bg-teal-50 p-4 rounded-lg text-center border border-teal-100">
-                            <p class="text-2xl font-bold text-teal-700">115</p>
+                            <p class="text-2xl font-bold text-teal-700">{{ scan.char_count }}</p>
                             <p class="text-xs text-teal-500 uppercase tracking-wide mt-1">Characters</p>
                         </div>
                         <div class="bg-emerald-50 p-4 rounded-lg text-center border border-emerald-100">
-                            <p class="text-2xl font-bold text-emerald-700">94%</p>
+                            <p class="text-2xl font-bold text-emerald-700">{{ scan.confidence }}%</p>
                             <p class="text-xs text-emerald-500 uppercase tracking-wide mt-1">AI Confidence</p>
                         </div>
                     </div>
@@ -90,7 +84,7 @@
                         <button class="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-medium rounded shadow-sm transition-colors">
                             Save Edits
                         </button>
-                        <button onclick="copyText()" class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium rounded shadow-sm transition-colors">
+                        <button id="copy-btn" onclick="copyText()" class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium rounded shadow-sm transition-colors">
                             Copy to Clipboard
                         </button>
                         <button class="px-4 py-2 bg-green-600 hover:bg-green-700 text-white text-sm font-medium rounded shadow-sm transition-colors">
@@ -103,11 +97,21 @@
     </main>
 
     <script>
-        function copyText() {
+        async function copyText() {
             const textarea = document.getElementById('extracted-text');
-            textarea.select();
-            document.execCommand('copy');
-            alert('Text copied to clipboard!');
+            const btn = document.getElementById('copy-btn');
+            const original = btn.textContent;
+            try {
+                await navigator.clipboard.writeText(textarea.value);
+                btn.textContent = 'Copied';
+            } catch (err) {
+                textarea.select();
+                document.execCommand('copy');
+                btn.textContent = 'Copied';
+            }
+            setTimeout(() => {
+                btn.textContent = original;
+            }, 1200);
         }
     </script>
 </body>

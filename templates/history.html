@@ -34,6 +34,7 @@
                 <a href="/new-scan" class="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700">New Scan</a>
             </div>
 
+            {% if scans %}
             <div class="overflow-x-auto">
                 <table class="w-full text-sm">
                     <thead>
@@ -46,23 +47,24 @@
                         </tr>
                     </thead>
                     <tbody>
+                        {% for scan in scans %}
                         <tr class="border-b border-slate-100">
-                            <td class="py-4">notebook_page_01.jpg</td>
-                            <td class="py-4">2026-04-27</td>
-                            <td class="py-4">187</td>
-                            <td class="py-4 text-emerald-600 font-semibold">94%</td>
-                            <td class="py-4"><a href="/results" class="text-indigo-600 hover:underline">View</a></td>
+                            <td class="py-4">{{ scan.filename }}</td>
+                            <td class="py-4">{{ scan.created_at }}</td>
+                            <td class="py-4">{{ scan.word_count }}</td>
+                            <td class="py-4 text-emerald-600 font-semibold">{{ scan.confidence }}%</td>
+                            <td class="py-4"><a href="/results/{{ scan.id }}" class="text-indigo-600 hover:underline">View</a></td>
                         </tr>
-                        <tr class="border-b border-slate-100">
-                            <td class="py-4">lecture_note_12.jpg</td>
-                            <td class="py-4">2026-04-26</td>
-                            <td class="py-4">143</td>
-                            <td class="py-4 text-emerald-600 font-semibold">92%</td>
-                            <td class="py-4"><a href="/results" class="text-indigo-600 hover:underline">View</a></td>
-                        </tr>
+                        {% endfor %}
                     </tbody>
                 </table>
             </div>
+            {% else %}
+            <div class="rounded-lg border border-slate-200 bg-slate-50 p-6 text-center">
+                <p class="text-slate-600">No scans in history yet.</p>
+                <a href="/new-scan" class="inline-block mt-3 px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700">Upload your first scan</a>
+            </div>
+            {% endif %}
         </section>
     </main>
 </body>

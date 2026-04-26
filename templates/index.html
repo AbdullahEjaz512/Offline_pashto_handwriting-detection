@@ -9,14 +9,11 @@
     <style>body { font-family: 'Inter', sans-serif; }</style>
 </head>
 <body class="bg-slate-50 text-slate-800 min-h-screen flex flex-col">
-    <!-- Navbar -->
     <nav class="bg-white shadow-sm border-b border-slate-200">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <div class="flex justify-between h-16">
                 <div class="flex items-center space-x-8">
-                    <div class="flex-shrink-0 flex items-center">
-                        <a href="/" class="text-blue-600 font-extrabold text-2xl tracking-tight">Pashto OCR</a>
-                    </div>
+                    <a href="/" class="text-blue-600 font-extrabold text-2xl tracking-tight">Pashto OCR</a>
                     <div class="hidden md:flex space-x-4">
                         <a href="/" class="text-slate-900 px-3 py-2 rounded-md text-sm font-medium bg-slate-100">Dashboard</a>
                         <a href="/new-scan" class="text-slate-500 hover:text-slate-900 px-3 py-2 rounded-md text-sm font-medium">New Scan</a>
@@ -30,65 +27,69 @@
         </div>
     </nav>
 
-    <!-- Main Content -->
-    <main class="flex-grow flex items-center justify-center p-6">
-        <div class="max-w-3xl w-full bg-white rounded-xl shadow-lg p-10 border border-slate-100">
-            <div class="text-center mb-10">
-                <h1 class="text-3xl font-bold text-slate-900 mb-2">Upload Document</h1>
-                <p class="text-slate-500">Extract text from Pashto handwritten notes instantly using AI.</p>
-            </div>
-
-            <!-- Upload Zone -->
-            <div id="dropzone" class="border-2 border-dashed border-slate-300 rounded-xl p-12 text-center hover:bg-slate-50 hover:border-indigo-400 transition-colors cursor-pointer" onclick="document.getElementById('file-upload').click()">
-                <p class="text-lg font-medium text-slate-700">Drag & Drop your Pashto document here</p>
-                <p class="text-sm text-slate-500 mt-1">or click to browse from your computer</p>
-                <input id="file-upload" type="file" accept="image/*" class="hidden">
-            </div>
-
-            <!-- File Preview -->
-            <div id="file-preview" class="hidden mt-6 bg-slate-50 border border-slate-200 rounded-lg p-4 flex items-center justify-between">
+    <main class="flex-grow max-w-7xl mx-auto w-full p-6 md:p-8">
+        <section class="bg-white rounded-xl shadow-lg border border-slate-100 p-8 md:p-10 mb-6">
+            <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
                 <div>
-                    <p id="file-name" class="text-sm font-semibold text-slate-700"></p>
-                    <p id="file-size" class="text-xs text-slate-500"></p>
+                    <h1 class="text-3xl md:text-4xl font-bold text-slate-900">Welcome to Pashto OCR</h1>
+                    <p class="text-slate-500 mt-2">Monitor scans, confidence trends, and jump into a new recognition run.</p>
                 </div>
+                <a href="/new-scan" class="inline-flex items-center justify-center px-6 py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-medium rounded-lg shadow-md">
+                    Start New Scan
+                </a>
             </div>
+        </section>
 
-            <!-- Submit Button -->
-            <div class="mt-8 text-center">
-                <button id="start-btn" class="w-full md:w-auto px-8 py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-medium rounded-lg shadow-md transition-all disabled:opacity-50 disabled:cursor-not-allowed mx-auto" disabled onclick="startProcessing()">
-                    <span id="btn-text">Start Recognition</span>
-                </button>
+        <section class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+            <div class="bg-white rounded-xl shadow-lg border border-slate-100 p-6">
+                <p class="text-sm uppercase text-slate-500 font-semibold tracking-wide">Total Scans</p>
+                <p class="text-3xl font-bold text-slate-900 mt-2">{{ total_scans }}</p>
             </div>
-        </div>
+            <div class="bg-white rounded-xl shadow-lg border border-slate-100 p-6">
+                <p class="text-sm uppercase text-slate-500 font-semibold tracking-wide">Average Confidence</p>
+                <p class="text-3xl font-bold text-emerald-600 mt-2">{{ avg_confidence }}%</p>
+            </div>
+            <div class="bg-white rounded-xl shadow-lg border border-slate-100 p-6">
+                <p class="text-sm uppercase text-slate-500 font-semibold tracking-wide">Last Scan</p>
+                <p class="text-lg font-semibold text-slate-900 mt-2">{{ latest.filename if latest else 'No scans yet' }}</p>
+            </div>
+        </section>
+
+        <section class="bg-white rounded-xl shadow-lg border border-slate-100 p-6 md:p-8">
+            <div class="flex items-center justify-between mb-4">
+                <h2 class="text-xl font-bold text-slate-900">Recent Scans</h2>
+                <a href="/history" class="text-indigo-600 hover:underline font-medium text-sm">View full history</a>
+            </div>
+            {% if recent_scans %}
+            <div class="overflow-x-auto">
+                <table class="w-full text-sm">
+                    <thead>
+                        <tr class="text-left text-slate-500 border-b border-slate-200">
+                            <th class="pb-3">File</th>
+                            <th class="pb-3">Date</th>
+                            <th class="pb-3">Words</th>
+                            <th class="pb-3">Confidence</th>
+                            <th class="pb-3">Action</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for scan in recent_scans %}
+                        <tr class="border-b border-slate-100">
+                            <td class="py-3">{{ scan.filename }}</td>
+                            <td class="py-3">{{ scan.created_at }}</td>
+                            <td class="py-3">{{ scan.word_count }}</td>
+                            <td class="py-3 text-emerald-600 font-semibold">{{ scan.confidence }}%</td>
+                            <td class="py-3"><a href="/results/{{ scan.id }}" class="text-indigo-600 hover:underline">View</a></td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
+            <p class="text-slate-500">No scans found yet. Start by uploading a new document.</p>
+            {% endif %}
+        </section>
     </main>
 
-    <script>
-        const fileInput = document.getElementById('file-upload');
-        const dropzone = document.getElementById('dropzone');
-        const filePreview = document.getElementById('file-preview');
-        const fileName = document.getElementById('file-name');
-        const fileSize = document.getElementById('file-size');
-        const startBtn = document.getElementById('start-btn');
-        const btnText = document.getElementById('btn-text');
-
-        fileInput.addEventListener('change', function() {
-            if (this.files && this.files[0]) {
-                const file = this.files[0];
-                fileName.textContent = file.name;
-                fileSize.textContent = (file.size / (1024 * 1024)).toFixed(2) + ' MB';
-                dropzone.classList.add('hidden');
-                filePreview.classList.remove('hidden');
-                startBtn.removeAttribute('disabled');
-            }
-        });
-
-        function startProcessing() {
-            btnText.textContent = 'Processing AI Models...';
-            startBtn.setAttribute('disabled', 'true');
-            setTimeout(() => {
-                window.location.href = '/results';
-            }, 1000);
-        }
-    </script>
 </body>
 </html>
