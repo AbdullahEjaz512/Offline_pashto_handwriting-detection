@@ -1,1 +1,13 @@
-[]
+[
+  {
+    "id": "eca7e5a2e0ca",
+    "filename": "test_page.jpg",
+    "stored_filename": "eca7e5a2e0ca_test_page.jpg",
+    "file_size": 13339,
+    "created_at": "2026-04-27 00:22",
+    "text": "پښتو یو ډېر په زړه پورې او تاریخي ژبه ده.\nدا د افغانستان او پاکستان په ډیرو سیمو کې ویل کیږي.",
+    "word_count": 21,
+    "char_count": 92,
+    "confidence": 91
+  }
+]

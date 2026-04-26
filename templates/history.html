@@ -29,31 +29,37 @@
 
     <main class="flex-grow max-w-7xl w-full mx-auto p-6 md:p-8">
         <section class="bg-white rounded-xl shadow-lg border border-slate-100 p-6 md:p-8">
-            <div class="flex items-center justify-between mb-6">
+            <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-6">
                 <h1 class="text-3xl font-bold text-slate-900">Scan History</h1>
-                <a href="/new-scan" class="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700">New Scan</a>
+                <a href="/new-scan" class="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 w-fit">New Scan</a>
             </div>
 
             {% if scans %}
             <div class="overflow-x-auto">
-                <table class="w-full text-sm">
+                <table class="min-w-full text-sm">
                     <thead>
                         <tr class="text-left text-slate-500 border-b border-slate-200">
-                            <th class="pb-3">File</th>
-                            <th class="pb-3">Date</th>
-                            <th class="pb-3">Words</th>
-                            <th class="pb-3">Confidence</th>
-                            <th class="pb-3">Action</th>
+                            <th class="pb-3 pr-4">ID</th>
+                            <th class="pb-3 pr-4">File</th>
+                            <th class="pb-3 pr-4">Recognized Text</th>
+                            <th class="pb-3 pr-4">Timestamp</th>
+                            <th class="pb-3 pr-4">Action</th>
                         </tr>
                     </thead>
                     <tbody>
                         {% for scan in scans %}
-                        <tr class="border-b border-slate-100">
-                            <td class="py-4">{{ scan.filename }}</td>
-                            <td class="py-4">{{ scan.created_at }}</td>
-                            <td class="py-4">{{ scan.word_count }}</td>
-                            <td class="py-4 text-emerald-600 font-semibold">{{ scan.confidence }}%</td>
-                            <td class="py-4"><a href="/results/{{ scan.id }}" class="text-indigo-600 hover:underline">View</a></td>
+                        <tr class="border-b border-slate-100 align-top">
+                            <td class="py-4 pr-4 font-medium text-slate-700">{{ scan.id }}</td>
+                            <td class="py-4 pr-4 text-slate-700">{{ scan.filename }}</td>
+                            <td class="py-4 pr-4 max-w-xl">
+                                <div dir="rtl" class="bg-slate-50 border border-slate-200 rounded-lg p-3 text-slate-700 leading-7 line-clamp-3">
+                                    {{ scan.text }}
+                                </div>
+                            </td>
+                            <td class="py-4 pr-4 text-slate-600 whitespace-nowrap">{{ scan.created_at }}</td>
+                            <td class="py-4 pr-4 whitespace-nowrap">
+                                <a href="/results/{{ scan.id }}" class="text-indigo-600 hover:underline font-medium">View</a>
+                            </td>
                         </tr>
                         {% endfor %}
                     </tbody>
@@ -61,7 +67,7 @@
             </div>
             {% else %}
             <div class="rounded-lg border border-slate-200 bg-slate-50 p-6 text-center">
-                <p class="text-slate-600">No scans in history yet.</p>
+                <p class="text-slate-600">No scan records found in the database yet.</p>
                 <a href="/new-scan" class="inline-block mt-3 px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700">Upload your first scan</a>
             </div>
             {% endif %}
