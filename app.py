@@ -40,24 +40,28 @@ def allowed_file(filename: str) -> bool:
 
 
 def run_ocr_text(image_path: Path) -> tuple[str, int]:
-    # Best-effort OCR integration with graceful fallback for missing model deps.
-    try:
-        from src.pipeline import FullPagePashtoRecognition  # type: ignore
+    # OCR integration - no fallback, fail loudly so we can debug
+    from src.pipeline import FullPagePashtoRecognition  # type: ignore
 
-        pipeline = FullPagePashtoRecognition()
-        lines = pipeline.process_full_page(str(image_path))
-        text = "\n".join([line.strip() for line in lines if str(line).strip()]).strip()
-        if text:
-            confidence = 94
-            return text, confidence
-    except Exception:
-        pass
+    pipeline = FullPagePashtoRecognition()
+    # Support both method names across pipeline revisions.
+    if hasattr(pipeline, "process_full_page"):
+        result = pipeline.process_full_page(str(image_path))
+    else:
+        result = pipeline.process_page(str(image_path))
 
-    fallback = (
-        "پښتو یو ډېر په زړه پورې او تاریخي ژبه ده.\n"
-        "دا د افغانستان او پاکستان په ډیرو سیمو کې ویل کیږي."
-    )
-    return fallback, 91
+    if isinstance(result, list):
+        text = "\n".join([line.strip() for line in result if str(line).strip()]).strip()
+    else:
+        text = str(result).strip()
+
+    if not text or text.strip() == "No lines detected.":
+        text = "No Pashto text could be clearly recognized in this image. Please try a higher-contrast photo or ensure the text is legible."
+        confidence = 0
+    else:
+        confidence = 94
+    return text, confidence
+
 
 
 def build_stats(text: str) -> tuple[int, int]:
@@ -149,7 +153,7 @@ def history():
 def results(scan_id: int | None = None):
     selected_db = None
     if scan_id is not None:
-        selected_db = ScanHistory.query.get(scan_id)
+        selected_db = db.session.get(ScanHistory, scan_id)
     if selected_db is None:
         selected_db = ScanHistory.query.order_by(ScanHistory.timestamp.desc()).first()
 
@@ -158,7 +162,7 @@ def results(scan_id: int | None = None):
         return redirect(url_for("new_scan"))
 
     selected = scan_to_view(selected_db)
-    return render_template("results.html", scan=selected)
+    return render_template("results.html", scan=selected, text_result=selected["text"])
 
 
 if __name__ == "__main__":
