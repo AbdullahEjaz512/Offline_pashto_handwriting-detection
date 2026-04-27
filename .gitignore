@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+
+# AI Models (Originals are fine, but keep robust out to save space)
+models/crnn_pashto_robust.pth
+
+# Web App Uploads
+static/uploads/*
+!static/uploads/.gitkeep
+
+# Research Data
+PHTI-MOBILE-AUGMENTED/
+Training_Mobile.txt
+PHTI-DATASET/
+Training.txt
+Testing.txt
+Validation.txt
+vocab.json

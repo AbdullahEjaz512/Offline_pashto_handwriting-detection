@@ -56,144 +56,111 @@ class FullPagePashtoRecognition:
     # ------------------------------------------------------------------
 
     def decode_predictions(self, logits):
-        """
-        Greedy CTC decoder.
-        Returns (decoded_string, mean_character_confidence).
-        """
+        """Greedy CTC decoder."""
+        # [SeqLen, NumClasses]
         probs = torch.softmax(logits, dim=2)
-        max_probs, preds = torch.max(probs, dim=2)
-        preds     = preds.squeeze(0).cpu().numpy()
-        max_probs = max_probs.squeeze(0).cpu().numpy()
+        best_path = torch.argmax(probs, dim=2).squeeze(0).cpu().numpy()
 
-        decoded, confidences = [], []
-        prev = -1
-        for p, prob in zip(preds, max_probs):
-            if p != prev and p != self.blank_id:
-                char = self.id_to_char.get(p, "")
-                if char not in ["<PAD>", "<UNK>", "<BLANK>"]:
-                    decoded.append(char)
-                    confidences.append(float(prob))
-            prev = p
+        char_list = []
+        last_char = -1
+        for char_id in best_path:
+            if char_id != self.blank_id and char_id != last_char:
+                char_list.append(self.id_to_char.get(char_id, ""))
+            last_char = char_id
 
-        text  = "".join(decoded)
-        score = float(np.mean(confidences)) if confidences else 0.0
+        text = "".join(char_list)
+        score = float(torch.max(probs, dim=2)[0].mean())
         return text, score
 
     # ------------------------------------------------------------------
-    # Per-crop decoding with multiple preprocessing variants
+    # Per-crop decoding with multiple preprocessing strategies
     # ------------------------------------------------------------------
 
-    def decode_crop_with_variants(self, crop):
-        """
-        Decode one line crop via multiple preprocessing variants.
-        The variant with the highest CTC confidence score wins.
-
-        Variants cover:
-          1. Raw grayscale        — clean paper, good light
-          2. CLAHE                — faint ink, low contrast
-          3. Adaptive threshold   — high contrast black-on-white
-          4. Shadow removal       — uneven lighting / mobile photo shadows
-        """
-        if crop is None or crop.size == 0:
-            return ""
-
-        ch, cw = crop.shape[:2]
+    def deskew_crop(self, crop):
+        """Straightens a line crop by detecting the text angle."""
         gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
+        # Find all 'ink' pixels
+        coords = np.column_stack(np.where(gray < 127))
+        if len(coords) < 10: return crop
+        
+        # Find the rotation angle of the best-fit box
+        angle = cv2.minAreaRect(coords)[-1]
+        if angle < -45: angle = -(90 + angle)
+        else: angle = -angle
+        
+        # Only rotate if the tilt is significant (e.g. > 0.5 degrees)
+        if abs(angle) < 0.5: return crop
+        
+        (h, w) = crop.shape[:2]
+        center = (w // 2, h // 2)
+        M = cv2.getRotationMatrix2D(center, angle, 1.0)
+        return cv2.warpAffine(crop, M, (w, h), flags=cv2.INTER_CUBIC, borderMode=cv2.BORDER_REPLICATE)
 
-        # ---- Variant 1: raw grayscale ----
-        v1 = gray
+    def decode_crop_with_variants(self, crop):
+        """Professional-grade multi-strategy preprocessing with Deskewing."""
+        if crop is None or crop.size == 0: return ""
+        
+        # 1. First, straighten the line (Deskew)
+        crop = self.deskew_crop(crop)
+        ch, cw = crop.shape[:2]
+        
+        # 2. Extract channels for better contrast on colored paper
+        b, g, r = cv2.split(crop)
+        gray_std = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
+        
+        variants = []
+        # Strategy A: Standard Gray + Dilation-Normalization
+        k = max(3, min(ch // 3, 15)) | 1
+        bg = cv2.dilate(gray_std, np.ones((k, k), np.uint8))
+        norm_gray = cv2.divide(gray_std, bg, scale=255)
+        variants.append(norm_gray)
+        
+        # Strategy B: Green Channel + Dilation-Normalization (Best for Pink Paper)
+        bg_g = cv2.dilate(g, np.ones((k, k), np.uint8))
+        norm_green = cv2.divide(g, bg_g, scale=255)
+        variants.append(norm_green)
 
-        # ---- Variant 2: CLAHE (local contrast boost) ----
-        tile  = max(1, min(8, ch // 4))
-        clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(tile, tile))
-        v2    = clahe.apply(gray)
+        # Strategy C: Sharpened Version
+        sharpen_kernel = np.array([[-1,-1,-1], [-1,9,-1], [-1,-1,-1]])
+        sharpened = cv2.filter2D(norm_gray, -1, sharpen_kernel)
+        variants.append(sharpened)
 
-        # ---- Variant 3: adaptive threshold (clean binary) ----
-        block = max(11, (ch // 2) | 1)
-        v3    = cv2.adaptiveThreshold(
-            v2, 255,
-            cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-            cv2.THRESH_BINARY,
-            block, 8,
-        )
+        best_text = ""
+        max_score = -1.0
 
-        # ---- Variant 4: shadow removal (mobile photo / uneven lighting) ----
-        # Kernel scaled to crop size so it bridges over the widest stroke
-        # but never larger than the crop itself.
-        k = max(3, min(ch // 3, 21)) | 1     # always odd
-        dilated = cv2.dilate(gray, np.ones((k, k), np.uint8))
-        bg      = cv2.medianBlur(dilated, k)
-        diff    = 255 - cv2.absdiff(gray, bg)
-        v4      = cv2.normalize(diff, None, 0, 255,
-                                cv2.NORM_MINMAX, cv2.CV_8UC1)
-
-        candidates = []
-        for v in [v1, v2, v3, v4]:
-            pil_img = Image.fromarray(v).convert('L')
-            tensor  = preprocess_line_crop(pil_img).to(self.device)
+        for v_img in variants:
+            pil_img = Image.fromarray(v_img).convert('L')
+            tensor = preprocess_line_crop(pil_img).to(self.device)
             with torch.no_grad():
                 logits = self.crnn(tensor)
             text, score = self.decode_predictions(logits)
             text = text.strip()
-            if text:
-                if len(text) < 3:
-                    score *= 0.5    # penalise likely-noise outputs
-                candidates.append((text, score))
-
-        if not candidates:
-            return ""
-
-        best_text, _ = max(candidates, key=lambda x: x[1])
+            
+            # Trust the model's confidence score (The Senior Way)
+            if score > max_score:
+                max_score = score
+                best_text = text
+        
         return best_text
 
-    # ------------------------------------------------------------------
-    # Full-page pipeline
-    # ------------------------------------------------------------------
+    def process_page(self, image_path):
+        """Full pipeline: segment -> decode -> combine."""
+        if not os.path.exists(image_path):
+            return ["Error: Image file not found."]
 
-    def process_page(self, page_image_path, save_crops=True):
-        """
-        Full pipeline: Image → YOLO/Fallback → CRNN → joined text
-        """
-        print(f"\nProcessing full page: {page_image_path}")
+        image = cv2.imread(image_path)
+        if image is None:
+            return ["Error: Could not load image."]
 
-        line_crops = self.segmenter.segment_lines(page_image_path)
-        print(f"Detected line crops: {len(line_crops)}")
-
-        if not line_crops:
-            return "No lines detected."
-
-        processed_dir = "data/processed"
-        os.makedirs(processed_dir, exist_ok=True)
-
-        recognized_lines = []
-        for idx, crop in enumerate(line_crops):
-            if save_crops:
-                cv2.imwrite(
-                    os.path.join(processed_dir, f"line_{idx:03d}.jpg"), crop)
-
+        # Stage 1: Segmentation
+        # Passing the path directly as expected by segmenter.py
+        crops = self.segmenter.segment_lines(image_path)
+        
+        # Stage 2: Recognition
+        results = []
+        for crop in crops:
             text = self.decode_crop_with_variants(crop)
             if text:
-                recognized_lines.append(text)
-
-        return "\n".join(recognized_lines)
-
-
-if __name__ == "__main__":
-    pipeline = FullPagePashtoRecognition(
-        yolo_weights="models/best.pt",
-        crnn_weights="models/crnn_pashto.pth",
-        vocab_path="models/vocab.json",
-    )
-    test_img = "data/raw/test_page.jpg"
-    if os.path.exists(test_img):
-        text = pipeline.process_page(test_img, save_crops=True)
-        print("\n==============================")
-        print(" EXTRACTED PASHTO DOCUMENT")
-        print("==============================\n")
-        try:
-            from bidi.algorithm import get_display
-            print(get_display(text))
-        except ImportError:
-            print(text)
-    else:
-        print(f"\nAdd a test document to {test_img} to run demo.")
+                results.append(text)
+        
+        return results

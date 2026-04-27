@@ -18,14 +18,27 @@ class YOLOSegmenter:
 
     def _binarize(self, img):
         """
-        Otsu binarisation on grayscale.
-        Works perfectly for dark ink on white/off-white paper.
-        Returns binary: ink=255, paper=0.
+        Universal Binarization (Professional Grade).
+        Handles: Pink paper, shadows, glare, and low contrast.
         """
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-        gray = cv2.GaussianBlur(gray, (3, 3), 0)
-        _, binary = cv2.threshold(
-            gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+        h, w = gray.shape
+        
+        # 1. Estimate background using a morphological 'closing' equivalent
+        # We use a kernel size relative to the expected line height
+        k_size = max(11, h // 40) | 1
+        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (k_size, k_size))
+        
+        # Dilation picks the brightest pixels (paper), effectively 'erasing' the ink
+        bg = cv2.dilate(gray, kernel)
+        bg = cv2.medianBlur(bg, k_size)
+        
+        # 2. Divide the original by the background to get a pure white-background image
+        # This removes paper color and shadows perfectly
+        norm = cv2.divide(gray, bg, scale=255)
+        
+        # 3. Final Binarization
+        _, binary = cv2.threshold(norm, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
         return binary
 
     def _remove_ruled_lines(self, binary, w):
