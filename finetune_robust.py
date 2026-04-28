@@ -6,9 +6,9 @@ from torch.utils.data import DataLoader
 import json
 import os
 
-# Import our custom dataset and model classes
-from dataset import PashtoHandwritingDataset, collate_fn, build_vocab
-from model import PashtoCRNN
+# Import our custom dataset and model classes from the src folder
+from src.dataset import PashtoHandwritingDataset, collate_fn, build_vocab
+from src.model import PashtoCRNN
 
 def finetune_robust():
     """

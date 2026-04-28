@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -54,6 +54,25 @@
                 <p class="text-lg font-semibold text-slate-900 mt-2">{{ latest.filename if latest else 'No scans yet' }}</p>
             </div>
         </section>
+        
+        <!-- Training Section -->
+        <section class="bg-indigo-900 rounded-xl shadow-lg p-8 md:p-10 mb-6 text-white overflow-hidden relative">
+            <div class="relative z-10 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
+                <div class="max-w-2xl">
+                    <h2 class="text-2xl md:text-3xl font-bold">Teach the AI your Handwriting</h2>
+                    <p class="text-indigo-200 mt-3 text-lg">The model improves every time you "Save Edits" in the results view. Run the training loop to synchronize your corrections into the AI's "Brain".</p>
+                </div>
+                <div class="flex flex-col items-center gap-3">
+                    <button id="train-btn" onclick="startTraining()" class="w-full lg:w-auto inline-flex items-center justify-center px-8 py-4 bg-white text-indigo-900 font-extrabold rounded-xl shadow-xl hover:bg-indigo-50 transition-all transform hover:scale-105 active:scale-95">
+                        <span id="btn-text">Run Fine-Tuning</span>
+                    </button>
+                    <p id="train-status" class="text-xs text-indigo-300 hidden animate-pulse">Training in progress... This may take a minute.</p>
+                </div>
+            </div>
+            <!-- Decorative background element -->
+            <div class="absolute -right-20 -bottom-20 w-64 h-64 bg-indigo-500 rounded-full opacity-20 blur-3xl"></div>
+            <div class="absolute -left-20 -top-20 w-64 h-64 bg-blue-400 rounded-full opacity-10 blur-3xl"></div>
+        </section>
 
         <section class="bg-white rounded-xl shadow-lg border border-slate-100 p-6 md:p-8">
             <div class="flex items-center justify-between mb-4">
@@ -91,5 +110,43 @@
         </section>
     </main>
 
+    <script>
+        async function startTraining() {
+            const btn = document.getElementById('train-btn');
+            const btnText = document.getElementById('btn-text');
+            const status = document.getElementById('train-status');
+            const originalText = btnText.textContent;
+            
+            if(!confirm("Start Fine-Tuning? This will use your saved edits to update the model. It might take 1-2 minutes depending on your hardware.")) return;
+
+            btn.disabled = true;
+            btnText.textContent = 'Training AI...';
+            btn.classList.add('opacity-75', 'cursor-not-allowed');
+            status.classList.remove('hidden');
+            
+            try {
+                const response = await fetch('/train-model', { 
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+                const result = await response.json();
+                
+                if (result.status === 'success') {
+                    alert("Victory! The model has been fine-tuned with your handwriting style.");
+                    location.reload();
+                } else {
+                    alert("Training Failed: " + result.message);
+                }
+            } catch (err) {
+                console.error(err);
+                alert("An error occurred during training. Check the console for details.");
+            } finally {
+                btn.disabled = false;
+                btnText.textContent = originalText;
+                btn.classList.remove('opacity-75', 'cursor-not-allowed');
+                status.classList.add('hidden');
+            }
+        }
+    </script>
 </body>
 </html>

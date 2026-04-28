@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -45,7 +45,7 @@
                 <div class="bg-white p-4 rounded-xl shadow border border-slate-100 flex-grow flex flex-col">
                     <h2 class="text-sm font-semibold text-slate-500 uppercase tracking-wider mb-4">Original Image</h2>
                     <div class="bg-slate-100 rounded-lg overflow-hidden flex-grow flex items-center justify-center p-4 border border-slate-200">
-                        <img src="{{ url_for('static', filename='uploads/' ~ scan.stored_filename) }}" alt="Uploaded document" class="max-h-[620px] w-auto object-contain rounded-lg shadow-sm">
+                        <img src="{{ url_for('static', filename='uploads/' ~ scan.filename) }}" alt="Uploaded document" class="max-h-[620px] w-auto object-contain rounded-lg shadow-sm">
                     </div>
                     <div class="mt-4 grid grid-cols-2 text-sm text-slate-500">
                         <div><span class="font-medium text-slate-700">Filename:</span> {{ scan.filename }}</div>
@@ -81,15 +81,15 @@
 
                     <!-- Action Footer -->
                     <div class="mt-6 flex flex-wrap gap-3 justify-end pt-4 border-t border-slate-100">
-                        <button class="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-medium rounded shadow-sm transition-colors">
+                        <button onclick="saveEdits()" id="save-edits-btn" class="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-medium rounded shadow-sm transition-colors">
                             Save Edits
                         </button>
                         <button id="copy-btn" onclick="copyText()" class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium rounded shadow-sm transition-colors">
                             Copy to Clipboard
                         </button>
-                        <button class="px-4 py-2 bg-green-600 hover:bg-green-700 text-white text-sm font-medium rounded shadow-sm transition-colors">
+                        <a href="{{ url_for('export_docx', scan_id=scan.id) }}" class="px-4 py-2 bg-green-600 hover:bg-green-700 text-white text-sm font-medium rounded shadow-sm transition-colors">
                             Export to Word (.docx)
-                        </button>
+                        </a>
                     </div>
                 </div>
             </div>
@@ -112,6 +112,53 @@
             setTimeout(() => {
                 btn.textContent = original;
             }, 1200);
+        }
+
+        async function saveEdits() {
+            const textarea = document.getElementById('extracted-text');
+            const btn = document.getElementById('save-edits-btn');
+            const original = btn.textContent;
+            const scanId = "{{ scan.id }}";
+            
+            btn.disabled = true;
+            btn.textContent = 'Saving...';
+            
+            try {
+                const response = await fetch('/save-edits', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        scan_id: scanId,
+                        text: textarea.value
+                    })
+                });
+                
+                const result = await response.json();
+                
+                if (result.status === 'success') {
+                    btn.textContent = 'Saved!';
+                    btn.classList.remove('bg-slate-100', 'text-slate-700');
+                    btn.classList.add('bg-green-100', 'text-green-700');
+                } else if (result.status === 'partial_success') {
+                    btn.textContent = 'Partially Saved';
+                    alert(result.message);
+                } else {
+                    btn.textContent = 'Error';
+                    alert('Error: ' + result.message);
+                }
+            } catch (err) {
+                console.error(err);
+                btn.textContent = 'Error';
+            } finally {
+                setTimeout(() => {
+                    btn.disabled = false;
+                    btn.textContent = original;
+                    btn.classList.add('bg-slate-100', 'text-slate-700');
+                    btn.classList.remove('bg-green-100', 'text-green-700');
+                }, 2000);
+            }
         }
     </script>
 </body>

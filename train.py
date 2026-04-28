@@ -7,8 +7,8 @@ import json
 import os
 
 # Import our custom dataset and model classes
-from dataset import PashtoHandwritingDataset, collate_fn, build_vocab
-from model import PashtoCRNN
+from src.dataset import PashtoHandwritingDataset, collate_fn, build_vocab
+from src.model import PashtoCRNN
 
 def train_crnn():
     """

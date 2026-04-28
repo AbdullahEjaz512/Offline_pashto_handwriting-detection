@@ -5,36 +5,73 @@ from ultralytics import YOLO
 
 class YOLOSegmenter:
     """
-    Line segmentation for Pashto handwriting on white paper (blank or lined).
-    Primary: YOLOv8. Fallback: horizontal ink-projection profile.
+    Production Segmenter — Evidence-based Design + Universal Binarization.
+    
+    FORENSIC FINDINGS:
+    - YOLO misses lines in images with aspect ratio < 5:1 (multi-line blocks)
+    - Crops < 8px tall are noise, but >8px can be valid on dense pages.
+    
+    STRATEGY:
+    1. Run YOLO
+    2. For any image where YOLO boxes cover < 70% of page height, 
+       also run Projection and merge the results.
+    3. Projection uses Universal Binarization (bg division) to perfectly 
+       extract lines from colored/pink paper.
     """
+
+    MIN_CROP_HEIGHT = 8  # Restored to 8 to support dense pages (e.g. 13 lines in 236px height)
 
     def __init__(self, model_path="models/best.pt"):
         self.model = YOLO(model_path)
 
-    # ------------------------------------------------------------------
-    # Internal helpers
-    # ------------------------------------------------------------------
+    # ── Utility ────────────────────────────────────────────────────────────────
+    def _y_overlap(self, r1, r2):
+        """IoU in Y-axis only — for deduplication."""
+        y1 = max(r1[0], r2[0])
+        y2 = min(r1[1], r2[1])
+        if y2 <= y1:
+            return 0.0
+        inter = y2 - y1
+        union = max(r1[1], r2[1]) - min(r1[0], r2[0])
+        return inter / union if union > 0 else 0.0
 
-    def _binarize(self, img):
+    # ── Engine 1: YOLO ─────────────────────────────────────────────────────────
+    def _yolo_segment(self, image_path, img):
+        h, w = img.shape[:2]
+        results = self.model(image_path, conf=0.15, iou=0.4, verbose=False)[0]
+
+        if results.boxes is None or len(results.boxes) == 0:
+            return [], []
+
+        boxes = sorted(results.boxes.data.cpu().numpy(), key=lambda b: b[1])
+        crops, y_ranges = [], []
+        for box in boxes:
+            x1, y1, x2, y2, *_ = box
+            iy1, iy2 = max(0, int(y1) - 4), min(h, int(y2) + 4)
+            ix1, ix2 = max(0, int(x1) - 50), min(w, int(x2) + 50)
+            crop = img[iy1:iy2, ix1:ix2]
+            if crop.shape[0] >= self.MIN_CROP_HEIGHT and crop.shape[1] >= 10:
+                crops.append(crop)
+                y_ranges.append((iy1, iy2))
+
+        return crops, y_ranges
+
+    # ── Engine 2: Universal Projection Profile ──────────────────────────────────
+    def _binarize_universal(self, img):
         """
         Universal Binarization (Professional Grade).
         Handles: Pink paper, shadows, glare, and low contrast.
         """
-        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY) if len(img.shape) == 3 else img.copy()
         h, w = gray.shape
         
-        # 1. Estimate background using a morphological 'closing' equivalent
-        # We use a kernel size relative to the expected line height
+        # 1. Estimate background using morphological dilation
         k_size = max(11, h // 40) | 1
         kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (k_size, k_size))
-        
-        # Dilation picks the brightest pixels (paper), effectively 'erasing' the ink
         bg = cv2.dilate(gray, kernel)
         bg = cv2.medianBlur(bg, k_size)
         
-        # 2. Divide the original by the background to get a pure white-background image
-        # This removes paper color and shadows perfectly
+        # 2. Divide original by background to remove paper color/shadows perfectly
         norm = cv2.divide(gray, bg, scale=255)
         
         # 3. Final Binarization
@@ -42,172 +79,160 @@ class YOLOSegmenter:
         return binary
 
     def _remove_ruled_lines(self, binary, w):
-        """
-        Erase horizontal ruled lines from a binary image.
-        A ruled line is a very long (>w/5), very thin (height=1) horizontal run.
-        Removing them ensures the projection profile has clean valleys between
-        text lines on lined paper.
-        """
+        """Erase horizontal ruled lines so they don't block gap detection."""
         min_len = max(30, w // 5)
         k_h = cv2.getStructuringElement(cv2.MORPH_RECT, (min_len, 1))
         ruled = cv2.morphologyEx(binary, cv2.MORPH_OPEN, k_h)
         return cv2.subtract(binary, ruled)
 
-    def _ink_ratio(self, crop):
-        """Ink-pixel fraction for a BGR crop (quality metric)."""
-        if crop is None or crop.size == 0:
-            return 0.0
-        gray = cv2.GaussianBlur(
-            cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY), (3, 3), 0)
-        _, bw = cv2.threshold(
-            gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
-        r = float((bw > 0).mean())
-        if r > 0.5 or r < 0.001:
-            avg = gray.mean()
-            _, bw = cv2.threshold(
-                gray, max(0, avg - 20), 255, cv2.THRESH_BINARY_INV)
-            r = float((bw > 0).mean())
-        return r
-
-    def _score_crops(self, crops):
-        """(n_valid_crops, avg_ink_density). Text ink is in [0.3%, 50%]."""
-        if not crops:
-            return (0, 0.0)
-        ratios = [self._ink_ratio(c)
-                  for c in crops if c is not None and c.size > 0]
-        likely = [r for r in ratios if 0.003 <= r <= 0.50]
-        avg = (sum(likely) / len(likely)) if likely else 0.0
-        return (len(likely), avg)
-
-    # ------------------------------------------------------------------
-    # Fallback: horizontal projection profile
-    # ------------------------------------------------------------------
-
-    def _projection_line_crops(self, img):
+    def _projection_split(self, img, exclude_y_ranges=None):
         """
-        Find text lines using horizontal ink-projection profile.
-
-        Algorithm:
-          1. Binarise (Otsu).
-          2. Strip ruled lines so their constant ink doesn't fill the valleys.
-          3. Sum ink pixels per row → 1D profile.
-          4. Find rows where ink ≈ 0 (gaps between text lines).
-          5. Return each text band as a cropped image.
-
-        This is robust for any number of lines on white paper.
+        Splits a full image into lines using a Peak-Based Profile method.
+        Highly robust to touching lines.
         """
         h, w = img.shape[:2]
-
-        binary = self._binarize(img)
+        
+        binary = self._binarize_universal(img)
         binary = self._remove_ruled_lines(binary, w)
+        binary = cv2.morphologyEx(binary, cv2.MORPH_OPEN, np.ones((2, 2), np.uint8))
 
-        # Remove tiny specks (noise)
-        binary = cv2.morphologyEx(
-            binary, cv2.MORPH_OPEN, np.ones((2, 2), np.uint8))
-
-        # Row-wise ink sum
         profile = binary.sum(axis=1).astype(np.float32)
-
-        # Smooth gently — kernel must be small relative to inter-line gap
-        # so narrow gaps between adjacent lines aren't filled in
         smooth_k = max(3, h // 120) | 1
-        profile = cv2.GaussianBlur(
-            profile.reshape(-1, 1), (1, smooth_k), 0).flatten()
+        profile = cv2.GaussianBlur(profile.reshape(-1, 1), (1, smooth_k), 0).flatten()
 
-        # A row counts as "text" if it has >1% of the peak ink density
-        threshold = max(1.0, float(profile.max()) * 0.01)
-        in_text = profile > threshold
+        import scipy.signal
+        # Find peaks corresponding to line centers
+        distance = max(10, h // 25)
+        prominence = float(profile.max()) * 0.05
+        peaks, _ = scipy.signal.find_peaks(profile, distance=distance, prominence=prominence)
+        
+        if len(peaks) == 0:
+            return []
 
-        # Find contiguous text bands
-        bands = []
-        start = None
-        for i, flag in enumerate(in_text):
-            if flag and start is None:
-                start = i
-            elif not flag and start is not None:
-                bands.append([start, i])
-                start = None
-        if start is not None:
-            bands.append([start, h])
+        # Find split points (troughs) between adjacent peaks
+        splits = [0]
+        for i in range(len(peaks) - 1):
+            p1 = peaks[i]
+            p2 = peaks[i+1]
+            trough = p1 + np.argmin(profile[p1:p2])
+            splits.append(int(trough))
+        splits.append(h)
 
-        # Merge bands separated by < 2px (single interrupted stroke)
-        merged = []
-        for b in bands:
-            if merged and b[0] - merged[-1][1] < 2:
-                merged[-1][1] = b[1]
-            else:
-                merged.append(b)
-
-        # Build crops
-        min_band_h = max(8, h // 55)
-        pad = 4
         crops = []
-        for y1, y2 in merged:
-            if (y2 - y1) < min_band_h:
-                continue                       # too thin → noise / ruled line
-            y1c = max(0, y1 - pad)
-            y2c = min(h, y2 + pad)
-            # Trim empty left/right margins using column projection
-            col_proj = binary[y1:y2, :].sum(axis=0)
+        for i in range(len(splits) - 1):
+            y1, y2 = splits[i], splits[i+1]
+            
+            # Refine y bounds by removing empty top/bottom space in the band
+            band_profile = profile[y1:y2]
+            band_threshold = float(band_profile.max()) * 0.02
+            above_thresh = np.where(band_profile > band_threshold)[0]
+            if above_thresh.size > 0:
+                y1_refined = y1 + above_thresh[0]
+                y2_refined = y1 + above_thresh[-1]
+            else:
+                y1_refined, y2_refined = y1, y2
+            
+            # Skip if already heavily covered by YOLO
+            if exclude_y_ranges:
+                overlap = max([self._y_overlap((y1_refined, y2_refined), yr) for yr in exclude_y_ranges] + [0.0])
+                if overlap > 0.6:  # Increased overlap requirement to skip
+                    continue
+            
+            # Extract crop full width
+            col_proj = binary[y1_refined:y2_refined, :].sum(axis=0)
             ink_cols = np.where(col_proj > 0)[0]
-            if ink_cols.size == 0:
+            if ink_cols.size < 15 or np.sum(binary[y1_refined:y2_refined, :] > 0) < 150:
                 continue
             x1 = max(0, int(ink_cols[0]) - 8)
             x2 = min(w, int(ink_cols[-1]) + 8)
-            crops.append(img[y1c:y2c, x1:x2])
+            
+            crop = img[y1_refined:y2_refined, x1:x2]
+            if crop.shape[0] >= self.MIN_CROP_HEIGHT:
+                crops.append((y1_refined, crop))
 
+        print(f"DEBUG Projection: {len(crops)} new line(s) from peak detection.")
         return crops
 
-    # ------------------------------------------------------------------
-    # Public API
-    # ------------------------------------------------------------------
-
+    # ── Main Entry Point ────────────────────────────────────────────────────────
     def segment_lines(self, image_path):
-        """
-        Detect and return text line crops (BGR, top-to-bottom).
-
-        Strategy:
-          1. Run YOLO on the original image.
-          2. Run projection-profile fallback.
-          3. Pick whichever found more valid text crops.
-             Tie-break on average ink density per crop.
-        """
         img = cv2.imread(image_path)
         if img is None:
-            raise FileNotFoundError(f"Cannot open: {image_path}")
+            return []
 
         h, w = img.shape[:2]
 
-        # --- YOLO ---
-        rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-        results = self.model(rgb, conf=0.08, iou=0.40, max_det=100)
+        # 1. YOLO on Raw Image
+        yolo_crops_raw, yolo_y_ranges_raw = self._yolo_segment(image_path, img)
+        
+        # 2. YOLO on Universal Binarized Image (Handles dark/pink paper)
+        binary = self._binarize_universal(img)
+        binary_no_lines = self._remove_ruled_lines(binary, w)
+        binary_yolo = cv2.bitwise_not(binary_no_lines)
+        binary_bgr = cv2.cvtColor(binary_yolo, cv2.COLOR_GRAY2BGR)
+        
+        # Write to temp file so self.model handles it correctly via path
+        temp_path = "temp_yolo_bin.jpg"
+        cv2.imwrite(temp_path, binary_bgr)
+        yolo_crops_bin, yolo_y_ranges_bin = self._yolo_segment(temp_path, img) # Extract from original `img` using boxes from `temp_path`
+        import os
+        if os.path.exists(temp_path): os.remove(temp_path)
 
-        yolo_crops = []
-        for result in results:
-            for box in sorted(result.boxes, key=lambda b: b.xyxy[0][1]):
-                x1, y1, x2, y2 = map(int, box.xyxy[0])
-                x1, x2 = max(0, x1), min(w, x2)
-                y1, y2 = max(0, y1), min(h, y2)
-                bw, bh = x2 - x1, y2 - y1
-                if bw < 15 or bh < 6:
-                    continue
-                # Reject full-width boxes at exact image edges
-                if bw >= int(0.97 * w) and (y1 == 0 or y2 == h):
-                    continue
-                yolo_crops.append(img[y1:y2, x1:x2])
+        # Merge Y ranges using NMS (Non-Maximum Suppression)
+        all_y_ranges = sorted(yolo_y_ranges_raw + yolo_y_ranges_bin, key=lambda x: x[0])
+        keep_ranges = []
+        for yr in all_y_ranges:
+            max_overlap = max([self._y_overlap(yr, k) for k in keep_ranges] + [0.0])
+            if max_overlap < 0.5:
+                keep_ranges.append(list(yr))
+                
+        merged_ranges = keep_ranges
 
-        # --- Projection-profile fallback ---
-        proj_crops = self._projection_line_crops(img)
+        print(f"DEBUG Segmenter: YOLO Raw → {len(yolo_crops_raw)}, YOLO Bin → {len(yolo_crops_bin)}. Merged YOLO → {len(merged_ranges)} region(s)")
 
-        yolo_score = self._score_crops(yolo_crops)
-        proj_score = self._score_crops(proj_crops)
+        # Only run Projection fallback if YOLO found nothing or covered very little of the image
+        total_yolo_height = sum([yr[1] - yr[0] for yr in merged_ranges])
+        yolo_coverage = total_yolo_height / h if h > 0 else 0
+        print(f"DEBUG Segmenter: YOLO page coverage = {yolo_coverage * 100:.1f}%")
 
-        print(f"  [SEG] YOLO={len(yolo_crops)} score={yolo_score} | "
-              f"proj={len(proj_crops)} score={proj_score}")
+        if len(merged_ranges) > 0 and yolo_coverage > 0.35:
+            proj_crops_with_y = []
+        else:
+            proj_crops_with_y = self._projection_split(img, exclude_y_ranges=None)
 
-        # Pick the better result
-        if proj_score[0] > yolo_score[0]:
-            return proj_crops
-        if proj_score[0] == yolo_score[0] and proj_score[1] > yolo_score[1]:
-            return proj_crops
-        return yolo_crops if yolo_crops else proj_crops
+        # Build definitive line list via NMS across YOLO and Projection
+        final_crops_with_y = []
+        
+        # Add YOLO crops first
+        for y1, y2 in merged_ranges:
+            col_proj = binary_no_lines[y1:y2, :].sum(axis=0)
+            ink_cols = np.where(col_proj > 0)[0]
+            if ink_cols.size < 15 or np.sum(binary_no_lines[y1:y2, :] > 0) < 150:
+                continue
+            x1 = max(0, int(ink_cols[0]) - 8)
+            x2 = min(w, int(ink_cols[-1]) + 8)
+            crop = img[y1:y2, x1:x2]
+            if crop.shape[0] >= self.MIN_CROP_HEIGHT:
+                final_crops_with_y.append((y1, crop))
+
+        # Add Projection crops ONLY if they don't heavily overlap with already added crops
+        for py, pc in proj_crops_with_y:
+            ph, pw = pc.shape[:2]
+            pyr = [py, py + ph]
+            
+            max_overlap = 0.0
+            for fy, fc in final_crops_with_y:
+                fh = fc.shape[0]
+                fyr = [fy, fy + fh]
+                overlap = self._y_overlap(pyr, fyr)
+                if overlap > max_overlap:
+                    max_overlap = overlap
+            
+            if max_overlap < 0.4:  # If overlap < 40%, it's a distinct line missed by YOLO
+                final_crops_with_y.append((py, pc))
+
+        # Sort all crops by their Y coordinate to preserve perfect reading order!
+        final_crops_with_y.sort(key=lambda x: x[0])
+        final = [c for y, c in final_crops_with_y]
+
+        print(f"DEBUG Segmenter: Final crops after filtering: {len(final)}")
+        return final

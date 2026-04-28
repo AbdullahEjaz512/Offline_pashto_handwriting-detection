@@ -4,7 +4,7 @@ import torch
 import torchvision.transforms.functional as TF
 from PIL import Image
 
-from model import PashtoCRNN
+from src.model import PashtoCRNN
 
 def preprocess_image(image_path, target_height=32):
     """
