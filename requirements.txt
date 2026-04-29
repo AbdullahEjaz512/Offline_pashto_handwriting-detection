@@ -1,0 +1,10 @@
+torch
+torchvision
+pillow
+flask
+flask_sqlalchemy
+werkzeug
+opencv-python
+numpy
+ultralytics
+tqdm
