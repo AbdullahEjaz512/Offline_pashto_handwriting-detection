@@ -239,6 +239,14 @@ class FullPagePashtoRecognition:
             hf_results, hf_confidence = self._run_hf_transformer_fallback(crops)
             if hf_results:
                 return hf_results, hf_confidence
+
+        # Scenario C: High line variance (significant portion of cropped segments missing output)
+        line_variance = len(crops) - len(results)
+        if line_variance > 2 and (line_variance / len(crops)) >= 0.30:
+            print(f"High line variance detected ({len(crops)} crops vs {len(results)} outputs). Executing HF fallback...")
+            hf_results, hf_confidence = self._run_hf_transformer_fallback(crops)
+            if hf_results:
+                return hf_results, hf_confidence
                 
         return results, confidence
 
@@ -261,5 +269,13 @@ class FullPagePashtoRecognition:
             text = self.decode_crop_with_variants(crop)
             if text:
                 results.append(text)
+                
+        # High line variance fallback
+        line_variance = len(crops) - len(results)
+        if line_variance > 2 and (line_variance / len(crops)) >= 0.30:
+            print(f"High line variance detected ({len(crops)} crops vs {len(results)} outputs). Executing HF fallback...")
+            hf_results, _ = self._run_hf_transformer_fallback(crops)
+            if hf_results:
+                return hf_results
         
         return results

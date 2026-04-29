@@ -21,3 +21,7 @@ Validation.txt
 vocab.json
 # Databases
 *.db
+
+# Model weights
+models/hf_pashto_trocr/
+

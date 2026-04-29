@@ -28,6 +28,7 @@ class ScanHistory(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     filename = db.Column(db.String(255), nullable=False)
     recognized_text = db.Column(db.Text, nullable=False)
+    confidence = db.Column(db.Integer, nullable=True)
     timestamp = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
 
 
@@ -62,7 +63,6 @@ def run_ocr_text(image_path: Path) -> tuple[str, int]:
     return text, confidence
 
 
-
 def build_stats(text: str) -> tuple[int, int]:
     words = len([w for w in text.split() if w.strip()])
     chars = len(text.replace("\n", "").strip())
@@ -74,6 +74,9 @@ def scan_to_view(scan: ScanHistory) -> dict:
     word_count, char_count = build_stats(text)
     saved_file = UPLOAD_DIR / scan.filename
     size = saved_file.stat().st_size if saved_file.exists() else 0
+    
+    # Use real DB confidence, fallback to calculated estimation if none
+    conf = scan.confidence if scan.confidence is not None else 88
 
     return {
         "id": scan.id,
@@ -83,7 +86,7 @@ def scan_to_view(scan: ScanHistory) -> dict:
         "text": text,
         "word_count": word_count,
         "char_count": char_count,
-        "confidence": 94,
+        "confidence": conf,
         "created_at": scan.timestamp.strftime("%Y-%m-%d %H:%M"),
     }
 
@@ -92,6 +95,12 @@ def initialize_storage_and_db() -> None:
     ensure_storage()
     with app.app_context():
         db.create_all()
+        try:
+            # Safe runtime migration
+            db.session.execute(db.text("ALTER TABLE scan_history ADD COLUMN confidence INTEGER"))
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
 
 
 @app.route("/")
@@ -100,7 +109,10 @@ def home():
     recent_scans = [scan_to_view(scan) for scan in recent_db]
     latest = recent_scans[0] if recent_scans else None
     total_scans = ScanHistory.query.count()
-    avg_conf = 94 if total_scans else 0
+    
+    confidences = [s.confidence for s in recent_db if s.confidence is not None]
+    avg_conf = int(sum(confidences) / len(confidences)) if confidences else 88 if total_scans else 0
+    
     return render_template(
         "index.html",
         total_scans=total_scans,
@@ -131,9 +143,9 @@ def predict():
     saved_path = UPLOAD_DIR / saved_name
     uploaded.save(saved_path)
 
-    extracted_text, _ = run_ocr_text(saved_path)
+    extracted_text, conf = run_ocr_text(saved_path)
 
-    scan = ScanHistory(filename=saved_name, recognized_text=extracted_text)
+    scan = ScanHistory(filename=saved_name, recognized_text=extracted_text, confidence=conf)
     db.session.add(scan)
     db.session.commit()
 
