@@ -56,20 +56,41 @@ class FullPagePashtoRecognition:
     # ------------------------------------------------------------------
 
     def decode_predictions(self, logits):
-        """Greedy CTC decoder."""
-        # [SeqLen, NumClasses]
+        """Greedy CTC decoder with realistic character-level confidence scores."""
         probs = torch.softmax(logits, dim=2)
         best_path = torch.argmax(probs, dim=2).squeeze(0).cpu().numpy()
+        probs_numpy = torch.max(probs, dim=2)[0].squeeze(0).cpu().numpy()
 
         char_list = []
+        char_probs = []
         last_char = -1
-        for char_id in best_path:
-            if char_id != self.blank_id and char_id != last_char:
-                char_list.append(self.id_to_char.get(char_id, ""))
+        current_char_probs = []
+
+        for char_id, prob in zip(best_path, probs_numpy):
+            if char_id != self.blank_id:
+                if char_id != last_char:
+                    if current_char_probs:
+                        char_probs.append(max(current_char_probs))
+                    current_char_probs = [prob]
+                    char_list.append(self.id_to_char.get(char_id, ""))
+                else:
+                    current_char_probs.append(prob)
+            else:
+                if current_char_probs:
+                    char_probs.append(max(current_char_probs))
+                    current_char_probs = []
             last_char = char_id
 
+        if current_char_probs:
+            char_probs.append(max(current_char_probs))
+
         text = "".join(char_list)
-        score = float(torch.max(probs, dim=2)[0].mean())
+        
+        if char_probs:
+            score = float(np.mean(char_probs))
+        else:
+            score = float(probs_numpy.mean())
+            
         return text, score
 
     # ------------------------------------------------------------------
@@ -96,9 +117,9 @@ class FullPagePashtoRecognition:
         M = cv2.getRotationMatrix2D(center, angle, 1.0)
         return cv2.warpAffine(crop, M, (w, h), flags=cv2.INTER_CUBIC, borderMode=cv2.BORDER_REPLICATE)
 
-    def decode_crop_with_variants(self, crop):
-        """Professional-grade multi-strategy preprocessing with Deskewing."""
-        if crop is None or crop.size == 0: return ""
+    def _decode_crop_with_score(self, crop):
+        """Professional-grade multi-strategy preprocessing with Deskewing. Returns (text, score)."""
+        if crop is None or crop.size == 0: return "", 0.0
         
         # 1. First, straighten the line (Deskew)
         crop = self.deskew_crop(crop)
@@ -126,7 +147,7 @@ class FullPagePashtoRecognition:
         variants.append(sharpened)
 
         best_text = ""
-        max_score = -1.0
+        max_score = 0.0
 
         for v_img in variants:
             pil_img = Image.fromarray(v_img).convert('L')
@@ -136,12 +157,39 @@ class FullPagePashtoRecognition:
             text, score = self.decode_predictions(logits)
             text = text.strip()
             
-            # Trust the model's confidence score (The Senior Way)
             if score > max_score:
                 max_score = score
                 best_text = text
         
-        return best_text
+        return best_text, max_score
+
+    def decode_crop_with_variants(self, crop):
+        text, _ = self._decode_crop_with_score(crop)
+        return text
+
+    def process_page_with_confidence(self, image_path):
+        """Full pipeline: segment -> decode -> combine. Returns (results, confidence)."""
+        if not os.path.exists(image_path):
+            return ["Error: Image file not found."], 0
+
+        image = cv2.imread(image_path)
+        if image is None:
+            return ["Error: Could not load image."], 0
+
+        crops = self.segmenter.segment_lines(image_path)
+        
+        results = []
+        scores = []
+        for crop in crops:
+            text, score = self._decode_crop_with_score(crop)
+            if text:
+                results.append(text)
+                scores.append(score)
+        
+        avg_score = float(np.mean(scores)) if scores else 0.0
+        confidence = int(avg_score * 100)
+            
+        return results, confidence
 
     def process_page(self, image_path):
         """Full pipeline: segment -> decode -> combine."""

@@ -19,3 +19,5 @@ Training.txt
 Testing.txt
 Validation.txt
 vocab.json
+# Databases
+*.db

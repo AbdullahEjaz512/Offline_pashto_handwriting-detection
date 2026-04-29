@@ -35,6 +35,12 @@ python app.py
 ```
 Visit `http://127.0.0.1:5000` in your web browser.
 
+### Mobile Camera Capture
+Because the Flask server is configured to bind to `0.0.0.0`, you can access the frontend dashboard from external mobile devices sharing your local area network (LAN):
+1. Identify your host desktop's IPv4 address (e.g. `192.168.1.XX`).
+2. Open the mobile browser and browse to `http://192.168.1.XX:5000/new-scan`.
+3. Click the **"Snap Pashto Document via Mobile Camera"** button to trigger instant camera previews.
+
 ### 2. Model Training
 To train the base CRNN:
 ```bash

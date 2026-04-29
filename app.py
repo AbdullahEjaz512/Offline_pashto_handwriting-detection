@@ -40,15 +40,15 @@ def allowed_file(filename: str) -> bool:
 
 
 def run_ocr_text(image_path: Path) -> tuple[str, int]:
-    # OCR integration - no fallback, fail loudly so we can debug
+    # OCR integration - dynamically extract scores
     from src.pipeline import FullPagePashtoRecognition  # type: ignore
 
     pipeline = FullPagePashtoRecognition()
-    # Support both method names across pipeline revisions.
-    if hasattr(pipeline, "process_full_page"):
-        result = pipeline.process_full_page(str(image_path))
+    if hasattr(pipeline, "process_page_with_confidence"):
+        result, confidence = pipeline.process_page_with_confidence(str(image_path))
     else:
         result = pipeline.process_page(str(image_path))
+        confidence = 88
 
     if isinstance(result, list):
         text = "\n".join([line.strip() for line in result if str(line).strip()]).strip()
@@ -58,8 +58,7 @@ def run_ocr_text(image_path: Path) -> tuple[str, int]:
     if not text or text.strip() == "No lines detected.":
         text = "No Pashto text could be clearly recognized in this image. Please try a higher-contrast photo or ensure the text is legible."
         confidence = 0
-    else:
-        confidence = 94
+        
     return text, confidence
 
 
@@ -167,7 +166,7 @@ def results(scan_id: int | None = None):
 
 if __name__ == "__main__":
     initialize_storage_and_db()
-    app.run(debug=True)
+    app.run(host="0.0.0.0", debug=True)
 
 
 initialize_storage_and_db()

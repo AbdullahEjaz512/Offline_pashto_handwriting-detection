@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -87,8 +87,8 @@
                         <button id="copy-btn" onclick="copyText()" class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium rounded shadow-sm transition-colors">
                             Copy to Clipboard
                         </button>
-                        <button class="px-4 py-2 bg-green-600 hover:bg-green-700 text-white text-sm font-medium rounded shadow-sm transition-colors">
-                            Export to Word (.docx)
+                        <button id="export-btn" onclick="exportToWord()" class="px-4 py-2 bg-green-600 hover:bg-green-700 text-white text-sm font-medium rounded shadow-sm transition-colors">
+                            Export to Word (.doc)
                         </button>
                     </div>
                 </div>
@@ -112,6 +112,27 @@
             setTimeout(() => {
                 btn.textContent = original;
             }, 1200);
+        }
+
+        function exportToWord() {
+            const text = document.getElementById('extracted-text').value;
+            const header = "<html xmlns:o='urn:schemas-microsoft-com:office:office' "+
+                    "xmlns:w='urn:schemas-microsoft-com:office:word' "+
+                    "xmlns='http://www.w3.org/TR/REC-html40'>"+
+                    "<head><meta charset='utf-8'><title>Export Word</title></head>"+
+                    "<body lang='ps' dir='rtl' style='font-family: Arial, sans-serif;'>";
+            const footer = "</body></html>";
+            const sourceHTML = header + text.replace(/\n/g, "<br>") + footer;
+            
+            const fileDownload = document.createElement("a");
+            document.body.appendChild(fileDownload);
+            const fileBuffer = new Blob(['\ufeff', sourceHTML], {type: 'application/msword'});
+            const fileUrl = URL.createObjectURL(fileBuffer);
+            
+            fileDownload.href = fileUrl;
+            fileDownload.download = 'Pashto_OCR_Result.doc';
+            fileDownload.click();
+            document.body.removeChild(fileDownload);
         }
     </script>
 </body>
