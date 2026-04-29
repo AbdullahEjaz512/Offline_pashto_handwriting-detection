@@ -167,6 +167,44 @@ class FullPagePashtoRecognition:
         text, _ = self._decode_crop_with_score(crop)
         return text
 
+    def _run_hf_transformer_fallback(self, crops):
+        """Runs the offline Hugging Face TrOCR model on a list of image crops."""
+        model_dir = os.path.join("models", "hf_pashto_trocr")
+        if not os.path.exists(model_dir) or not os.listdir(model_dir):
+            model_dir = "osamajan90/pashto-trocr-handwritten"
+            
+        try:
+            from transformers import VisionEncoderDecoderModel, TrOCRProcessor
+            from PIL import Image
+            import torch
+            
+            print(f"Executing TrOCR fallback using model: {model_dir}")
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+            
+            processor = TrOCRProcessor.from_pretrained(model_dir)
+            model = VisionEncoderDecoderModel.from_pretrained(model_dir).to(device)
+            
+            results = []
+            for crop in crops:
+                if crop is None or crop.size == 0:
+                    continue
+                pil_img = Image.fromarray(cv2.cvtColor(crop, cv2.COLOR_BGR2RGB))
+                pixel_values = processor(images=pil_img, return_tensors="pt").pixel_values.to(device)
+                
+                with torch.no_grad():
+                    generated_ids = model.generate(pixel_values)
+                
+                generated_text = processor.batch_decode(generated_ids, skip_special_tokens=True)[0]
+                if generated_text.strip():
+                    results.append(generated_text.strip())
+            
+            fallback_confidence = 75 if results else 0
+            return results, fallback_confidence
+            
+        except Exception as e:
+            print(f"HF Fallback Error: {e}")
+            return [], 0
+
     def process_page_with_confidence(self, image_path):
         """Full pipeline: segment -> decode -> combine. Returns (results, confidence)."""
         if not os.path.exists(image_path):
@@ -178,6 +216,11 @@ class FullPagePashtoRecognition:
 
         crops = self.segmenter.segment_lines(image_path)
         
+        # Scenario A: Page detects NOTHING
+        if not crops:
+            print("No lines detected by segmenter. Passing full page to HuggingFace fallback...")
+            return self._run_hf_transformer_fallback([image])
+            
         results = []
         scores = []
         for crop in crops:
@@ -188,7 +231,14 @@ class FullPagePashtoRecognition:
         
         avg_score = float(np.mean(scores)) if scores else 0.0
         confidence = int(avg_score * 100)
-            
+        
+        # Scenario B: Confidence score is less than 65%
+        if confidence < 65:
+            print(f"CRNN Confidence is low ({confidence}%). Executing HuggingFace fallback...")
+            hf_results, hf_confidence = self._run_hf_transformer_fallback(crops)
+            if hf_results:
+                return hf_results, hf_confidence
+                
         return results, confidence
 
     def process_page(self, image_path):
