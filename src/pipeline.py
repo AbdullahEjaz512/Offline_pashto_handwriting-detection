@@ -170,7 +170,8 @@ class FullPagePashtoRecognition:
     def _run_hf_transformer_fallback(self, crops):
         """Runs the offline Hugging Face TrOCR model on a list of image crops."""
         model_dir = os.path.join("models", "hf_pashto_trocr")
-        if not os.path.exists(model_dir) or not os.listdir(model_dir):
+        has_weights = os.path.exists(os.path.join(model_dir, "model.safetensors")) or os.path.exists(os.path.join(model_dir, "pytorch_model.bin"))
+        if not has_weights:
             model_dir = "osamajan90/pashto-trocr-handwritten"
             
         try:
